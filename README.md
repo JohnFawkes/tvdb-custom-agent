@@ -45,12 +45,23 @@ alternate DVD and alternate 2. You can choose the ordering **per library and per
 
 ## Quick start (Docker)
 
+Images for `linux/amd64` and `linux/arm64` are published to the GitHub Container
+Registry as `ghcr.io/johnfawkes/tvdb-custom-agent`:
+
+| Tag | Built from |
+|---|---|
+| `latest` | the `main` branch |
+| `1.2.3`, `1.2` | release tags `v1.2.3` |
+| `sha-<commit>` | every published commit |
+
+Get the compose file into an empty folder:
+
 ```bash
-git clone https://github.com/JohnFawkes/tvdb-custom-agent.git
+mkdir tvdb-agent && cd tvdb-agent
 ```
 
 ```bash
-cd tvdb-custom-agent
+curl -fsSLO https://raw.githubusercontent.com/JohnFawkes/tvdb-custom-agent/main/docker-compose.yml
 ```
 
 Create a `.env` file next to `docker-compose.yml`:
@@ -59,6 +70,10 @@ Create a `.env` file next to `docker-compose.yml`:
 TVDB_API_KEY=your-key
 # TVDB_PIN=1234
 ADMIN_TOKEN=pick-a-long-random-string
+# TVDB_AGENT_TAG=1.2.3     # pin a release instead of latest
+# TVDB_AGENT_PORT=8000     # host port
+# PUID=1000                # user/group that owns ./data
+# PGID=1000
 ```
 
 ```bash
@@ -66,15 +81,36 @@ mkdir -p data config
 ```
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 ```
 
 The container runs as UID/GID 1000 by default. Set `PUID` and `PGID` in `.env` if
 `./data` belongs to a different user. The agent must be able to write there to
-save per-show overrides.
+save per-show overrides. Put an optional `config.yaml` in `./config`.
 
 Check that it runs: `http://<host>:8000/health` should return `{"status":"ok",…}`,
 and `http://<host>:8000/` should return a `MediaProvider` document.
+
+To update, run `docker compose pull` and then `docker compose up -d`.
+
+Without compose:
+
+```bash
+docker run -d --name tvdb-agent --restart unless-stopped -p 8000:8000 -e TVDB_API_KEY=your-key -e ADMIN_TOKEN=change-me -v "$PWD/data:/data" ghcr.io/johnfawkes/tvdb-custom-agent:latest
+```
+
+### Building the image yourself
+
+From a clone of this repository, uncomment `build: .` in `docker-compose.yml`
+and run `docker compose up -d --build`, or:
+
+```bash
+docker build -t tvdb-custom-agent .
+```
+
+The [`docker` workflow](.github/workflows/docker.yml) builds the image on every
+pull request and runs a smoke test with `docker-compose.yml`. It publishes to
+GHCR from `main` and from `v*.*.*` tags.
 
 ### Without Docker
 
