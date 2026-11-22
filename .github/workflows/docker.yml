@@ -1,0 +1,106 @@
+name: docker
+
+# Builds the container image on every pull request (build + smoke test only)
+# and publishes it to GitHub Container Registry from main and version tags:
+#   main        -> ghcr.io/<owner>/tvdb-custom-agent:latest, :sha-<short>
+#   tag v1.2.3  -> ghcr.io/<owner>/tvdb-custom-agent:1.2.3, :1.2, :sha-<short>
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    env:
+      # The name docker-compose.yml uses; the smoke test runs the compose file against it.
+      COMPOSE_IMAGE: ghcr.io/johnfawkes/tvdb-custom-agent
+      # Inputs for docker-compose.yml during the smoke test.
+      TVDB_AGENT_TAG: ci
+      TVDB_API_KEY: dummy-key
+      ADMIN_TOKEN: ci-token
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image for the smoke test
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: ${{ env.COMPOSE_IMAGE }}:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test with docker compose
+        run: |
+          mkdir -p data config
+          export PUID="$(id -u)" PGID="$(id -g)"
+          docker compose config --quiet
+          docker compose up -d
+          for _ in $(seq 1 30); do
+            curl -fsS http://localhost:8000/health && break
+            sleep 1
+          done
+          echo
+          root="$(curl -fsS http://localhost:8000/)"
+          grep -q '"identifier":"tv.plex.agents.custom.tvdbcustomagent"' <<< "$root"
+          dvd="$(curl -fsS http://localhost:8000/profiles/dvd)"
+          grep -q '"identifier":"tv.plex.agents.custom.tvdbcustomagent.dvd"' <<< "$dvd"
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/admin/api/overrides)" = 401
+          curl -fsS -X PUT -H "X-Admin-Token: $ADMIN_TOKEN" -H "Content-Type: application/json" \
+            -d '{"order":"dvd"}' http://localhost:8000/admin/api/overrides/global/12345
+          grep -q '"12345": "dvd"' data/overrides.json
+          echo "Smoke test passed"
+
+      - name: Container logs
+        if: always()
+        run: docker compose logs --no-color || true
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+            type=ref,event=pr
+
+      - name: Build (and push) multi-arch image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
