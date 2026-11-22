@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TVDB Agent Admin</title>
+<style>
+  :root { --bg:#f6f7f9; --fg:#1d2330; --muted:#5d6676; --card:#fff; --line:#dde1e7; --accent:#2f6fde; --warn:#b54708; --ok:#1a7f37; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#12151b; --fg:#e6e9ef; --muted:#9aa3b2; --card:#1b2029; --line:#2c3340; --accent:#6b9cff; --warn:#f5a25d; --ok:#56d364; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:var(--bg); color:var(--fg); }
+  main { max-width: 980px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  p.sub { margin: 0 0 20px; color: var(--muted); }
+  section { background: var(--card); border:1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  table { width:100%; border-collapse: collapse; }
+  th, td { text-align:left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-weight: 600; color: var(--muted); font-size: 13px; }
+  code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
+  input, select, button { font: inherit; color: inherit; background: var(--bg); border:1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
+  button { cursor: pointer; background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.secondary { background: transparent; color: var(--fg); border-color: var(--line); }
+  .row { display:flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .muted { color: var(--muted); }
+  .warn { color: var(--warn); }
+  .ok { color: var(--ok); }
+  .results li { margin: 4px 0; }
+  .results a { color: var(--accent); cursor: pointer; }
+  .scroll { overflow-x: auto; }
+  ul { padding-left: 18px; margin: 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>TVDB Agent</h1>
+  <p class="sub">Manage per-show episode orderings and find the provider URLs to add to Plex.</p>
+
+  <section id="auth" hidden>
+    <h2>Admin token</h2>
+    <div class="row">
+      <input id="token" type="password" placeholder="ADMIN_TOKEN" size="32">
+      <button id="saveToken">Save</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Provider URLs</h2>
+    <p class="muted">Add one of these to Plex as a metadata provider. Use a different one per library to give that library a different default episode order.</p>
+    <div class="scroll"><table id="profiles"><thead><tr><th>URL</th><th>Identifier</th><th>Default order</th></tr></thead><tbody></tbody></table></div>
+  </section>
+
+  <section>
+    <h2>Find a show</h2>
+    <div class="row">
+      <input id="q" placeholder="Title or TVDB id" size="32">
+      <button id="search">Search</button>
+    </div>
+    <ul class="results" id="results"></ul>
+  </section>
+
+  <section id="seriesBox" hidden>
+    <h2 id="seriesTitle"></h2>
+    <div class="scroll"><table id="orders"><thead><tr><th>Order</th><th>Seasons</th><th>Episodes</th></tr></thead><tbody></tbody></table></div>
+    <p class="muted" style="margin-top:12px">Order currently used by each provider URL:</p>
+    <div class="scroll"><table id="effective"><thead><tr><th>Provider</th><th>Order</th><th>Why</th></tr></thead><tbody></tbody></table></div>
+    <div class="row" style="margin-top:12px">
+      <label>Scope <select id="scope"></select></label>
+      <label>Order <select id="order"></select></label>
+      <button id="saveOverride">Save override</button>
+    </div>
+    <p class="muted">After changing an order, run <em>Refresh Metadata</em> on the show in Plex.</p>
+  </section>
+
+  <section>
+    <h2>Overrides</h2>
+    <div class="scroll"><table id="overrides"><thead><tr><th>Scope</th><th>TVDB id</th><th>Order</th><th>Source</th><th></th></tr></thead><tbody></tbody></table></div>
+  </section>
+  <p id="msg" class="warn"></p>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let token = "";
+try { token = localStorage.getItem("tvdbAgentToken") || ""; } catch (e) {}
+let status = null, currentSeries = null;
+
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function msg(t, ok) { $("msg").textContent = t || ""; $("msg").className = ok ? "ok" : "warn"; }
+
+async function api(path, opts = {}) {
+  opts.headers = Object.assign({"Content-Type": "application/json"}, opts.headers || {});
+  if (token) opts.headers["X-Admin-Token"] = token;
+  const res = await fetch(path, opts);
+  if (res.status === 401) { $("auth").hidden = false; throw new Error("Admin token required"); }
+  if (res.status === 204) return null;
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.detail || body.error || res.statusText);
+  return body;
+}
+
+async function loadStatus() {
+  status = await api("/admin/api/status");
+  if (status.authRequired) $("auth").hidden = false;
+  if (!status.tvdbConfigured) msg("TVDB_API_KEY is not configured.");
+  const base = (status.publicUrl || location.origin).replace(/\/$/, "");
+  $("profiles").tBodies[0].innerHTML = status.profiles.map(p =>
+    `<tr><td><code>${esc(base + (p.path === "/" ? "" : p.path))}</code></td><td><code>${esc(p.identifier)}</code></td><td>${esc(p.episodeOrder)}</td></tr>`).join("");
+  $("scope").innerHTML = `<option value="global">All providers</option>` +
+    status.profiles.filter(p => p.name).map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join("");
+}
+
+async function loadOverrides() {
+  const data = await api("/admin/api/overrides");
+  $("overrides").tBodies[0].innerHTML = data.overrides.map(o => {
+    const scope = o.scope === "*" ? "global" : o.scope;
+    const del = o.source === "runtime" ? `<button class="secondary" data-del="${esc(scope)}/${o.seriesId}">Remove</button>` : `<span class="muted">config file</span>`;
+    return `<tr><td>${esc(scope)}</td><td><a data-open="${o.seriesId}">${o.seriesId}</a></td><td>${esc(o.order)}</td><td>${esc(o.source)}</td><td>${del}</td></tr>`;
+  }).join("") || `<tr><td colspan="5" class="muted">No overrides yet.</td></tr>`;
+}
+
+async function openSeries(id) {
+  msg("");
+  const s = await api(`/admin/api/series/${id}`);
+  currentSeries = s;
+  $("seriesBox").hidden = false;
+  $("seriesTitle").textContent = `${s.title} (${s.year || "?"}) - TVDB ${s.seriesId}`;
+  $("orders").tBodies[0].innerHTML = s.orders.map(o =>
+    `<tr><td>${esc(o.name)}${o.slug === s.defaultOrder ? " <span class='muted'>(TVDB default)</span>" : ""}</td><td>${o.seasons}</td><td>${o.episodes}</td></tr>`).join("");
+  $("effective").tBodies[0].innerHTML = s.effective.map(e =>
+    `<tr><td><code>${esc(e.profile || "/")}</code></td><td>${esc(e.order)}</td><td class="muted">${esc(e.reason)}</td></tr>`).join("");
+  $("order").innerHTML = `<option value="default">Series default</option>` +
+    s.orders.map(o => `<option value="${esc(o.slug)}">${esc(o.name)}</option>`).join("");
+}
+
+$("search").onclick = async () => {
+  msg("");
+  const q = $("q").value.trim();
+  if (!q) return;
+  if (/^\d+$/.test(q)) { try { await openSeries(q); } catch (e) { msg(e.message); } return; }
+  try {
+    const data = await api(`/admin/api/search?q=${encodeURIComponent(q)}`);
+    $("results").innerHTML = data.results.map(r =>
+      `<li><a data-open="${r.seriesId}">${esc(r.title)}</a> <span class="muted">${esc(r.year || "")} - TVDB ${r.seriesId} - score ${r.score}</span></li>`).join("") || "<li class='muted'>No results</li>";
+  } catch (e) { msg(e.message); }
+};
+$("q").addEventListener("keydown", e => { if (e.key === "Enter") $("search").click(); });
+
+$("saveOverride").onclick = async () => {
+  if (!currentSeries) return;
+  const chosen = $("order").value;
+  try {
+    await api(`/admin/api/overrides/${encodeURIComponent($("scope").value)}/${currentSeries.seriesId}`,
+      {method: "PUT", body: JSON.stringify({order: chosen})});
+    await loadOverrides();
+    await openSeries(currentSeries.seriesId);
+    $("order").value = chosen;
+    msg("Saved. Refresh the show's metadata in Plex to apply it.", true);
+  } catch (e) { msg(e.message); }
+};
+
+document.addEventListener("click", async (e) => {
+  const open = e.target.closest("[data-open]");
+  if (open) { try { await openSeries(open.dataset.open); } catch (err) { msg(err.message); } }
+  const del = e.target.closest("[data-del]");
+  if (del) {
+    try { await api(`/admin/api/overrides/${del.dataset.del}`, {method: "DELETE"}); await loadOverrides(); }
+    catch (err) { msg(err.message); }
+  }
+});
+
+$("saveToken").onclick = async () => {
+  token = $("token").value.trim();
+  try { localStorage.setItem("tvdbAgentToken", token); } catch (e) {}
+  init();
+};
+
+async function init() {
+  try { await loadStatus(); await loadOverrides(); msg(status && !status.tvdbConfigured ? "TVDB_API_KEY is not configured." : ""); }
+  catch (e) { msg(e.message); }
+}
+init();
+</script>
+</body>
+</html>

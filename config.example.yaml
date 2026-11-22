@@ -1,0 +1,66 @@
+# Example configuration. Copy to config.yaml (or /config/config.yaml in Docker).
+# Every setting is optional except the TVDB API key, which can also come from
+# the TVDB_API_KEY environment variable. Environment variables win over this file.
+
+tvdb:
+  api_key: "your-tvdb-v4-api-key"
+  # pin: "1234"            # only needed for user-supported (subscriber) keys
+  # max_concurrency: 8     # parallel requests to TheTVDB
+
+provider:
+  # Must start with "tv.plex.agents.custom." and use only letters, digits and dots.
+  # Profiles get "<identifier>.<profile name>". Changing this later changes the
+  # GUIDs of everything already matched, so pick it once.
+  identifier: "tv.plex.agents.custom.tvdbcustomagent"
+  title: "TheTVDB (self-hosted)"
+  # One extra provider per TVDB ordering at /profiles/<name>:
+  # aired, dvd, absolute, alternate, regional, altdvd, alttwo
+  builtin_profiles: true
+
+defaults:
+  language: "en"                 # used when Plex sends no X-Plex-Language
+  fallback_languages: ["en"]     # tried when a title/summary is missing in the requested language
+  # default = whatever TVDB marks as the show's default (usually aired).
+  # Also: aired | dvd | absolute | alternate | regional | altdvd | alttwo
+  episode_order: "default"
+  # Use the ordering chosen in Plex (it is sent as ?episodeOrder=tvdbDvd, ...).
+  honor_plex_episode_order: true
+  # If a profile's order does not exist for a show, use the show's default
+  # order instead of returning no episodes.
+  fallback_to_default_order: true
+  theme_music: true              # link Plex's TV theme songs (tvthemes.plexapp.com)
+  season_titles: true            # use TVDB season names ("Volume Two") instead of "Season 2"
+  max_cast: 50
+  match_min_score: 40            # 0-100; automatic matches below this are rejected
+  match_max_results: 10          # results for a manual "Fix Match" search
+
+# Per-show orders for every provider URL. Key = TVDB series id.
+# These win over the order chosen in Plex and over profile defaults.
+show_overrides:
+  # 72108: dvd        # e.g. a show whose DVD order matches your files
+  # 81797: absolute   # e.g. an anime with absolute episode numbers
+
+# Custom profiles: each becomes its own provider at /profiles/<name> with its
+# own identifier, so you can give each Plex library different defaults.
+profiles:
+  anime:
+    title: "TheTVDB (Anime, absolute order)"
+    episode_order: absolute
+    # language: "en"
+    # force_language: false        # true = ignore the language Plex asks for
+    # honor_plex_episode_order: true
+    # fallback_to_default_order: true
+    show_overrides:
+      # 12345: aired                 # this show uses aired order in the anime library only
+
+server:
+  # admin_token: "change-me"       # protects /admin (or set ADMIN_TOKEN)
+  # data_dir: "./data"             # where runtime overrides are stored
+  # host: "0.0.0.0"
+  # port: 8000
+  # log_level: "INFO"              # DEBUG logs every match request from Plex
+  # public_url: "http://192.168.1.10:8000"   # shown on the admin page
+
+cache:
+  ttl: 43200                       # seconds TVDB responses are cached (12 h)
+  max_entries: 4096
