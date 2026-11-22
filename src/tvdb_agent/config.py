@@ -122,7 +122,9 @@ class Settings:
     host: str = "0.0.0.0"
     port: int = 8000
     log_level: str = "INFO"
-    public_url: str | None = None  # only used for display on the admin page
+    public_url: str | None = None  # how Plex/browsers reach this agent (admin page, Plex registration)
+    plex_url: str | None = None  # Plex Media Server URL, for "Register in Plex"
+    plex_token: str | None = None
 
     profiles: dict[str, Profile] = field(default_factory=dict)
     root: Profile | None = None
@@ -197,6 +199,9 @@ def build_settings(data: dict[str, Any], env: bool = True) -> Settings:
     s.port = int(server.get("port") or s.port)
     s.log_level = server.get("log_level") or s.log_level
     s.public_url = server.get("public_url") or None
+    plex = data.get("plex") or {}
+    s.plex_url = plex.get("url") or None
+    s.plex_token = plex.get("token") or None
 
     if env:
         s.tvdb_api_key = _env("TVDB_API_KEY") or s.tvdb_api_key
@@ -218,6 +223,8 @@ def build_settings(data: dict[str, Any], env: bool = True) -> Settings:
         s.port = int(_env("PORT") or s.port)
         s.log_level = _env("LOG_LEVEL") or s.log_level
         s.public_url = _env("PUBLIC_URL") or s.public_url
+        s.plex_url = _env("PLEX_URL") or s.plex_url
+        s.plex_token = _env("PLEX_TOKEN") or s.plex_token
         if _env("CACHE_TTL"):
             s.cache_ttl = int(_env("CACHE_TTL"))  # type: ignore[arg-type]
 

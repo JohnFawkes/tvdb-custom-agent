@@ -43,7 +43,8 @@ class Ctx:
         return self.profile.identifier
 
     def path(self, rating_key: str, suffix: str = "") -> str:
-        return f"{self.profile.base_path}/library/metadata/{rating_key}{suffix}"
+        # Relative to the provider URL, like the feature keys.
+        return f"/library/metadata/{rating_key}{suffix}"
 
     def guid(self, kind: str, rating_key: str) -> str:
         return keys.guid(self.identifier, kind, rating_key)

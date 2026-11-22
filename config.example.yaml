@@ -59,7 +59,15 @@ server:
   # host: "0.0.0.0"
   # port: 8000
   # log_level: "INFO"              # DEBUG logs every match request from Plex
-  # public_url: "http://192.168.1.10:8000"   # shown on the admin page
+  # public_url: "http://192.168.1.10:8000"   # this agent as Plex reaches it
+
+# Used by "Register in Plex" (admin page) and `tvdb-agent register-plex`, which
+# add one Plex agent per episode ordering. The token can also be typed on the
+# admin page instead of being stored here.
+plex:
+  # url: "http://192.168.1.10:32400"      # Plex as this agent reaches it
+  # token: "your-plex-token"
+  # server.public_url above is used as the agent URL Plex should call.
 
 cache:
   ttl: 43200                       # seconds TVDB responses are cached (12 h)
