@@ -1,0 +1,18 @@
+services:
+  tvdb-agent:
+    build: .
+    container_name: tvdb-agent
+    restart: unless-stopped
+    user: "${PUID:-1000}:${PGID:-1000}"     # must be able to write ./data
+    ports:
+      - "8000:8000"
+    environment:
+      TVDB_API_KEY: "${TVDB_API_KEY}"       # required
+      TVDB_PIN: "${TVDB_PIN:-}"             # only for user-supported (subscriber) keys
+      ADMIN_TOKEN: "${ADMIN_TOKEN:-}"       # protects /admin; strongly recommended
+      # DEFAULT_LANGUAGE: "en"              # used when Plex does not send X-Plex-Language
+      # DEFAULT_EPISODE_ORDER: "default"    # default | aired | dvd | absolute | ...
+      # LOG_LEVEL: "DEBUG"                  # logs every request body Plex sends
+    volumes:
+      - ./data:/data                        # runtime per-show overrides (overrides.json)
+      - ./config:/config                    # optional config.yaml (see config.example.yaml)
