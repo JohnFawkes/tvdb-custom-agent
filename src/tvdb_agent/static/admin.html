@@ -31,6 +31,11 @@
   .results a { color: var(--accent); cursor: pointer; }
   .scroll { overflow-x: auto; }
   ul { padding-left: 18px; margin: 0; }
+  .form { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+  .form label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+  .form input { width: 100%; }
+  .checks { display: flex; flex-wrap: wrap; gap: 6px 18px; }
+  .checks label { display: flex; gap: 6px; align-items: center; }
 </style>
 </head>
 <body>
@@ -47,8 +52,24 @@
   </section>
 
   <section>
+    <h2>Register in Plex</h2>
+    <p class="muted">Adds one Plex agent per episode ordering. Afterwards, pick the ordering for a TV library in Plex under
+      <em>Edit library &gt; Advanced &gt; Agent</em>, then run <em>Refresh All Metadata</em>. Single shows can still be switched
+      in the show's own <em>Edit &gt; Advanced &gt; Episode ordering</em> setting. Running this again is safe.</p>
+    <div class="form">
+      <label>Plex server URL <input id="plexUrl" placeholder="http://192.168.1.10:32400"></label>
+      <label>Plex token <input id="plexToken" type="password" placeholder="X-Plex-Token"></label>
+      <label>Agent URL, as Plex reaches it <input id="agentUrl" placeholder="http://tvdb-agent:8000"></label>
+    </div>
+    <p class="muted" style="margin:12px 0 6px">Orderings to add as agents:</p>
+    <div id="plexProfiles" class="checks"></div>
+    <div class="row" style="margin-top:12px"><button id="registerPlex">Register in Plex</button></div>
+    <div class="scroll"><table id="plexResults" hidden><thead><tr><th>Agent in Plex</th><th>Provider URL</th><th>Result</th></tr></thead><tbody></tbody></table></div>
+  </section>
+
+  <section>
     <h2>Provider URLs</h2>
-    <p class="muted">Add one of these to Plex as a metadata provider. Use a different one per library to give that library a different default episode order.</p>
+    <p class="muted">Each URL is a separate provider with its own default episode ordering. <em>Register in Plex</em> adds them for you.</p>
     <div class="scroll"><table id="profiles"><thead><tr><th>URL</th><th>Identifier</th><th>Default order</th></tr></thead><tbody></tbody></table></div>
   </section>
 
@@ -176,8 +197,34 @@ $("saveToken").onclick = async () => {
   init();
 };
 
+async function loadPlex() {
+  const info = await api("/admin/api/plex");
+  if (info.plexUrl) $("plexUrl").value = info.plexUrl;
+  if (info.tokenConfigured) $("plexToken").placeholder = "using PLEX_TOKEN from the server";
+  $("agentUrl").value = info.agentUrl || location.origin;
+  $("plexProfiles").innerHTML = info.profiles.map(p =>
+    `<label><input type="checkbox" value="${esc(p.name)}" ${p.default ? "checked" : ""}> ${esc(p.agent)}</label>`).join("");
+}
+
+$("registerPlex").onclick = async () => {
+  msg("");
+  const profiles = [...document.querySelectorAll("#plexProfiles input:checked")].map(i => i.value);
+  if (!profiles.length) { msg("Pick at least one ordering."); return; }
+  $("registerPlex").disabled = true;
+  try {
+    const res = await api("/admin/api/plex/register", {method: "POST", body: JSON.stringify({
+      plexUrl: $("plexUrl").value.trim(), token: $("plexToken").value.trim(), agentUrl: $("agentUrl").value.trim(), profiles})});
+    $("plexResults").hidden = false;
+    $("plexResults").tBodies[0].innerHTML = res.results.map(r =>
+      `<tr><td>${esc(r.agent)}</td><td><code>${esc(r.uri)}</code></td><td class="${r.error ? "warn" : "ok"}">${
+        r.error ? esc(r.error) : `provider ${esc(r.provider)}, agent ${esc(r.group)}`}</td></tr>`).join("");
+    msg(res.ok ? "Done. Pick the agent for each TV library in Plex, then Refresh All Metadata." : "Some agents could not be registered; see the table.", res.ok);
+  } catch (e) { msg(e.message); }
+  finally { $("registerPlex").disabled = false; }
+};
+
 async function init() {
-  try { await loadStatus(); await loadOverrides(); msg(status && !status.tvdbConfigured ? "TVDB_API_KEY is not configured." : ""); }
+  try { await loadStatus(); await loadPlex(); await loadOverrides(); msg(status && !status.tvdbConfigured ? "TVDB_API_KEY is not configured." : ""); }
   catch (e) { msg(e.message); }
 }
 init();

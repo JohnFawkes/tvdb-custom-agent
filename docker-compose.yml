@@ -24,7 +24,10 @@ services:
       ADMIN_TOKEN: "${ADMIN_TOKEN:-}"       # protects /admin; strongly recommended
       # DEFAULT_LANGUAGE: "en"              # used when Plex does not send X-Plex-Language
       # DEFAULT_EPISODE_ORDER: "default"    # default | aired | dvd | absolute | ...
-      # PUBLIC_URL: "http://192.168.1.10:8000"   # shown on the admin page
+      # Used by "Register in Plex" on the admin page (adds one Plex agent per ordering):
+      # PUBLIC_URL: "http://192.168.1.10:8000"   # this agent as Plex reaches it
+      # PLEX_URL: "http://192.168.1.10:32400"    # Plex as this agent reaches it
+      # PLEX_TOKEN: "${PLEX_TOKEN:-}"            # or type it on the admin page
       # LOG_LEVEL: "DEBUG"                  # logs every request body Plex sends
     volumes:
       - ./data:/data                        # runtime per-show overrides (overrides.json)

@@ -14,11 +14,12 @@ from urllib.parse import parse_qsl
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
-from . import __version__, orders
+from . import __version__, keys, orders
 from .cache import TTLCache
 from .config import GLOBAL_SCOPE_NAMES, Profile, Settings, load_settings
 from .customize import Customization
 from .overrides import GLOBAL, OverrideStore, OverrideStoreError
+from .plex import PlexClient, PlexError, agent_title, default_profile_names, register, resolve_profiles
 from .service import Agent, BadRequest, Ctx, NotFound
 from .tvdb import TVDBAuthError, TVDBClient, TVDBError, TVDBNotFound
 
@@ -31,9 +32,9 @@ _REPEATED_PREFIX = re.compile(r"^(/profiles/[A-Za-z0-9]+)(?:\1)+(?=/|$)")
 class ProfilePrefixMiddleware:
     """Collapse ``/profiles/x/profiles/x/...`` into ``/profiles/x/...``.
 
-    Feature keys we advertise include the profile prefix, so they work
-    whether Plex resolves them against the server root or appends them to
-    the provider URL."""
+    Version 0.1.0 advertised feature keys that already contained the profile
+    prefix; Plex appends feature keys to the provider URL, so providers it
+    registered back then request doubled paths until they are refreshed."""
 
     def __init__(self, app) -> None:
         self.app = app
@@ -69,6 +70,7 @@ def create_app(
     settings: Settings | None = None,
     tvdb: TVDBClient | None = None,
     overrides: OverrideStore | None = None,
+    plex_transport: Any = None,
 ) -> FastAPI:
     settings = settings or load_settings()
     owns_client = tvdb is None
@@ -195,8 +197,10 @@ def create_app(
                 "version": __version__,
                 "Types": types,
                 "Feature": [
-                    {"type": "metadata", "key": f"{prof.base_path}/library/metadata"},
-                    {"type": "match", "key": f"{prof.base_path}/library/metadata/matches"},
+                    # Relative to the provider URL: Plex appends feature keys to the
+                    # URL it registered (verified on PMS 1.43.5).
+                    {"type": "metadata", "key": "/library/metadata"},
+                    {"type": "match", "key": "/library/metadata/matches"},
                 ],
             }
         })
@@ -221,6 +225,13 @@ def create_app(
         ctx = ctx_of(request)
         images = await agent.images(rating_key, ctx)
         return container(ctx, images, element="Image")
+
+    async def get_extras(request: Request, rating_key: str):
+        # Plex asks for extras on every refresh; TVDB has none to offer.
+        ctx = ctx_of(request)
+        if keys.parse_key(rating_key) is None:
+            raise NotFound(f"unknown ratingKey '{rating_key}'")
+        return container(ctx, [])
 
     async def post_match(request: Request):
         raw = await request.body()
@@ -250,6 +261,7 @@ def create_app(
         app.add_api_route(base + "/{rating_key}/children", get_children, methods=["GET"], include_in_schema=False)
         app.add_api_route(base + "/{rating_key}/grandchildren", get_grandchildren, methods=["GET"], include_in_schema=False)
         app.add_api_route(base + "/{rating_key}/images", get_images, methods=["GET"], include_in_schema=False)
+        app.add_api_route(base + "/{rating_key}/extras", get_extras, methods=["GET"], include_in_schema=False)
 
     # -------------------------------------------------------------- misc
     @app.get("/health", include_in_schema=False)
@@ -364,6 +376,60 @@ def create_app(
             "orders": order_rows,
             "effective": effective,
         }
+
+    @app.get("/admin/api/plex", include_in_schema=False)
+    async def admin_plex_info(request: Request):
+        require_admin(request)
+        defaults = set(default_profile_names(settings))
+        return {
+            "plexUrl": settings.plex_url,
+            "tokenConfigured": bool(settings.plex_token),
+            "agentUrl": settings.public_url,
+            "profiles": [
+                {
+                    "name": p.name or "",
+                    "agent": agent_title(settings, p),
+                    "identifier": p.identifier,
+                    "path": p.base_path or "/",
+                    "episodeOrder": p.episode_order,
+                    "default": (p.name or "") in defaults,
+                }
+                for p in settings.all_profiles()
+            ],
+        }
+
+    @app.post("/admin/api/plex/register", include_in_schema=False)
+    async def admin_plex_register(request: Request):
+        """Create/update one Plex agent per profile, so each ordering can be
+        picked in a library's Agent setting."""
+        require_admin(request)
+        try:
+            payload = await request.json()
+        except json.JSONDecodeError:
+            payload = {}
+        payload = payload if isinstance(payload, dict) else {}
+        plex_url = (payload.get("plexUrl") or settings.plex_url or "").strip()
+        token = (payload.get("token") or settings.plex_token or "").strip() or None
+        agent_url = (payload.get("agentUrl") or settings.public_url or "").strip()
+        if not plex_url:
+            raise HTTPException(status_code=400, detail="plexUrl is required (or set PLEX_URL)")
+        if not agent_url:
+            raise HTTPException(status_code=400, detail="agentUrl is required (or set PUBLIC_URL)")
+        names = payload.get("profiles")
+        try:
+            profiles = resolve_profiles(settings, names if isinstance(names, list) else None)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        client = PlexClient(plex_url, token, transport=plex_transport)
+        try:
+            results = await register(client, settings, profiles, agent_url)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except PlexError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        finally:
+            await client.aclose()
+        return {"ok": all(r.error is None for r in results), "results": [r.as_dict() for r in results]}
 
     @app.post("/admin/api/cache/clear", include_in_schema=False)
     async def admin_clear_cache(request: Request, series_id: int | None = None):

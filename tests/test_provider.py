@@ -23,11 +23,13 @@ def test_profile_root_has_own_identifier_and_prefixed_keys(client):
         assert body["identifier"] == ROOT_ID + ".dvd"
         assert body["Types"][0]["Scheme"][0]["scheme"] == ROOT_ID + ".dvd"
         features = {f["type"]: f["key"] for f in body["Feature"]}
-        assert features["metadata"] == "/profiles/dvd/library/metadata"
+        # Provider-relative: Plex appends feature keys to the registered URL.
+        assert features == {"metadata": "/library/metadata", "match": "/library/metadata/matches"}
     assert client.get("/profiles/nope").status_code == 404
 
 
 def test_repeated_profile_prefix_is_collapsed(client):
+    # Providers registered with 0.1.0 (prefixed feature keys) request doubled paths.
     md = one(client.get("/profiles/dvd/profiles/dvd/library/metadata/series-1000"))
     assert md["guid"] == f"{ROOT_ID}.dvd://show/series-1000"
 
@@ -165,8 +167,8 @@ def test_dvd_profile(client):
     first = eps[0]
     assert first["ratingKey"] == "episode-1000-dvd-9002"
     assert first["guid"] == f"{ROOT_ID}.dvd://episode/episode-1000-dvd-9002"
-    assert first["key"] == "/profiles/dvd/library/metadata/episode-1000-dvd-9002"
-    assert first["grandparentKey"] == "/profiles/dvd/library/metadata/series-1000"
+    assert first["key"] == "/library/metadata/episode-1000-dvd-9002"
+    assert first["grandparentKey"] == "/library/metadata/series-1000"
     show = one(client.get("/profiles/dvd/library/metadata/series-1000"))
     assert show["SeasonType"][0]["id"] == "tvdbDvd"  # profile order listed first
 
@@ -472,3 +474,9 @@ def test_tvdb_404_maps_to_404(client, fake):
 
     fake.route = route
     assert client.get("/library/metadata/series-1000/grandchildren").status_code == 404
+
+
+def test_extras_is_empty(client):
+    container = client.get("/profiles/dvd/library/metadata/series-1000/extras").json()["MediaContainer"]
+    assert container["size"] == 0 and container["Metadata"] == []
+    assert client.get("/library/metadata/nonsense/extras").status_code == 404
