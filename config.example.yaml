@@ -64,6 +64,17 @@ server:
   # log_level: "INFO"              # DEBUG logs every match request from Plex
   # public_url: "http://192.168.1.10:8000"   # this agent as Plex reaches it
 
+# IMDb ratings from IMDb's public dataset (personal/non-commercial use).
+# No key needed; the ~9 MB file is cached in data_dir/imdb and refreshed daily.
+imdb:
+  ratings: true
+  # refresh_hours: 24
+
+# Optional: TMDB ratings, and TMDB/IMDb ids TheTVDB lacks (or set TMDB_API_KEY).
+# Use the "API Read Access Token" from https://www.themoviedb.org/settings/api
+tmdb:
+  # api_key: "eyJ..."
+
 # Used by "Register in Plex" (admin page) and `tvdb-agent register-plex`, which
 # add one Plex agent per episode ordering. The token can also be typed on the
 # admin page instead of being stored here.

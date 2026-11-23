@@ -424,7 +424,7 @@ def test_bad_tvdb_key_returns_500(make_client, fake):
     from tvdb_agent.tvdb import TVDBClient
     from fastapi.testclient import TestClient
 
-    settings = build_settings({"tvdb": {"api_key": "wrong"}}, env=False)
+    settings = build_settings({"tvdb": {"api_key": "wrong"}, "imdb": {"ratings": False}}, env=False)
     with TestClient(create_app(settings, tvdb=TVDBClient("wrong", transport=fake.transport))) as c:
         resp = c.get("/library/metadata/series-1000")
     assert resp.status_code == 500

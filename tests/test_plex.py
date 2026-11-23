@@ -159,7 +159,8 @@ def test_admin_register_endpoint(fake, tmp_path):
     from tvdb_agent.tvdb import TVDBClient
 
     plex = FakePlex()
-    s = build_settings({"tvdb": {"api_key": "test-key"}, "server": {"data_dir": str(tmp_path), "admin_token": "adm"},
+    s = build_settings({"tvdb": {"api_key": "test-key"}, "imdb": {"ratings": False},
+                        "server": {"data_dir": str(tmp_path), "admin_token": "adm"},
                         "plex": {"url": "http://plex:32400", "token": TOKEN}}, env=False)
     app = create_app(s, tvdb=TVDBClient("test-key", transport=FakeTVDB().transport), plex_transport=plex.transport)
     hdr = {"X-Admin-Token": "adm"}

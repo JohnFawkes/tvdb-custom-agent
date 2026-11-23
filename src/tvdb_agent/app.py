@@ -19,7 +19,9 @@ from .cache import TTLCache
 from .config import GLOBAL_SCOPE_NAMES, Profile, Settings, load_settings
 from .customize import Customization
 from .overrides import GLOBAL, OverrideStore, OverrideStoreError
+from .imdb import IMDbRatings
 from .plex import PlexClient, PlexError, agent_title, default_profile_names, register, resolve_profiles
+from .tmdb import TMDBClient
 from .service import Agent, BadRequest, Ctx, NotFound
 from .tvdb import TVDBAuthError, TVDBClient, TVDBError, TVDBNotFound
 
@@ -71,6 +73,8 @@ def create_app(
     tvdb: TVDBClient | None = None,
     overrides: OverrideStore | None = None,
     plex_transport: Any = None,
+    imdb_transport: Any = None,
+    tmdb_transport: Any = None,
 ) -> FastAPI:
     settings = settings or load_settings()
     owns_client = tvdb is None
@@ -85,7 +89,13 @@ def create_app(
             user_agent=f"tvdb-custom-agent/{__version__}",
         )
     overrides = overrides or OverrideStore(settings)
-    agent = Agent(settings, tvdb, overrides)
+    imdb = (
+        IMDbRatings(settings.data_dir, url=settings.imdb_dataset_url, refresh_hours=settings.imdb_refresh_hours,
+                    transport=imdb_transport)
+        if settings.imdb_ratings else None
+    )
+    tmdb = TMDBClient(settings.tmdb_api_key, transport=tmdb_transport) if settings.tmdb_api_key else None
+    agent = Agent(settings, tvdb, overrides, imdb=imdb, tmdb=tmdb)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -95,7 +105,14 @@ def create_app(
             log.warning("ADMIN_TOKEN is not set - the /admin page is open to anyone who can reach this server")
         for p in settings.all_profiles():
             log.info("Provider %-45s at %s/", p.identifier, p.base_path)
+        if imdb is not None:
+            imdb.start()  # loads/downloads the IMDb ratings dataset in the background
+        log.info("Ratings: IMDb dataset %s, TMDB %s", "on" if imdb else "off", "on" if tmdb else "off (no TMDB_API_KEY)")
         yield
+        if imdb is not None:
+            await imdb.aclose()
+        if tmdb is not None:
+            await tmdb.aclose()
         if owns_client:
             await tvdb.aclose()
 
@@ -266,7 +283,13 @@ def create_app(
     # -------------------------------------------------------------- misc
     @app.get("/health", include_in_schema=False)
     async def health():
-        return {"status": "ok", "version": __version__, "tvdbConfigured": bool(settings.tvdb_api_key)}
+        return {
+            "status": "ok",
+            "version": __version__,
+            "tvdbConfigured": bool(settings.tvdb_api_key),
+            "imdbRatings": imdb.status() if imdb else None,
+            "tmdbConfigured": tmdb is not None,
+        }
 
     @app.get("/profiles", include_in_schema=False)
     async def list_profiles():

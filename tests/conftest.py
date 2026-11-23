@@ -30,11 +30,12 @@ def fake() -> FakeTVDB:
 def make_client(fake, tmp_path):
     clients = []
 
-    def _make(config: dict | None = None) -> TestClient:
-        data = _merge({"tvdb": {"api_key": "test-key"}, "server": {"data_dir": str(tmp_path)}}, config or {})
+    def _make(config: dict | None = None, app_kwargs: dict | None = None) -> TestClient:
+        data = _merge({"tvdb": {"api_key": "test-key"}, "server": {"data_dir": str(tmp_path)},
+                       "imdb": {"ratings": False}}, config or {})
         settings = build_settings(data, env=False)
         tvdb = TVDBClient("test-key", transport=fake.transport)
-        client = TestClient(create_app(settings, tvdb=tvdb))
+        client = TestClient(create_app(settings, tvdb=tvdb, **(app_kwargs or {})))
         client.__enter__()
         clients.append(client)
         return client

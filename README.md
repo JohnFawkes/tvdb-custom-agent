@@ -24,6 +24,9 @@ alternate DVD and alternate 2. You can choose the ordering **per library and per
   rating, and IMDb/TMDB GUIDs. Plex refreshes a show through its seasons and never
   asks for single episodes, so the agent includes these details in every season it
   returns.
+- Ratings: IMDb ratings for shows and episodes from IMDb's free public dataset
+  (no key needed). With an optional TMDB key you also get TMDB ratings, and any
+  TMDB/IMDb ids TheTVDB lacks are filled in.
 - Translations: follows `X-Plex-Language` (for example `de-DE`), with fallback
   languages for anything TVDB hasn't translated.
 - Episode orderings:
@@ -282,6 +285,8 @@ for every option.
 | `HONOR_PLEX_EPISODE_ORDER` | `true` | Honor the ordering chosen in Plex |
 | `BUILTIN_PROFILES` | `true` | Expose `/profiles/<ordering>` for every TVDB ordering |
 | `THEME_MUSIC` | `true` | Add Plex's theme song URL for each show |
+| `IMDB_RATINGS` | `true` | IMDb ratings from IMDb's public dataset (`title.ratings.tsv.gz`, about 9 MB, refreshed daily, cached in `DATA_DIR/imdb`, about 14 MB of memory). Set to `false` to skip the download |
+| `TMDB_API_KEY` | | Optional. TMDB "API Read Access Token" (or v3 API key): adds TMDB ratings and fills in TMDB/IMDb ids TheTVDB lacks |
 | `EPISODE_DETAILS` | `true` | Fetch each episode's full TVDB record (cast, crew, IMDb/TMDB ids) when Plex loads a season. That is one TVDB call per episode, cached. Set to `false` to make fewer TVDB requests |
 | `CACHE_TTL` | `43200` | Seconds to cache TVDB responses |
 | `DATA_DIR` | `./data` (`/data` in Docker) | Where runtime overrides are stored |
@@ -340,11 +345,10 @@ first 20 items, as the Plex spec requires. `includeFields`, `excludeFields`,
   the matching profile.
 - **An agent's changes don't show up.** Plex keeps each agent's definition in
   memory until Plex restarts. New agents appear right away.
-- **No IMDb/TMDB ratings.** TheTVDB doesn't provide them. Plex lets an agent
-  combine providers. Adding Plex's own "Plex Series" as a second provider in the
-  agent was accepted by Plex 1.43.5, which then ran it as a post-processor. This
-  wasn't tested against a server signed in to plex.tv, so check the results on
-  one show first.
+- **Missing ratings.** IMDb ratings need the IMDb id of the show or episode.
+  TheTVDB has it for most shows and many episodes. Set `TMDB_API_KEY` to fill in
+  the rest from TMDB, which also adds TMDB ratings. `/health` shows whether the
+  IMDb dataset has loaded.
 - **Seeing what Plex sends.** Set `LOG_LEVEL=DEBUG`. Every request is logged,
   including match bodies.
 
@@ -384,5 +388,9 @@ src/tvdb_agent/
 
 ## Notes
 
-This project is not affiliated with Plex or TheTVDB. Follow TheTVDB's API terms
+IMDb ratings come from IMDb's
+[non-commercial datasets](https://developer.imdb.com/non-commercial-datasets/),
+which are for personal and non-commercial use only.
+
+This project is not affiliated with Plex, TheTVDB, IMDb or TMDB. Follow TheTVDB's API terms
 for your key. Metadata and artwork belong to TheTVDB and its contributors.

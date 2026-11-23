@@ -11,6 +11,8 @@ from typing import Any
 from . import keys, mapper, matching, orders
 from .config import Profile, Settings
 from .i18n import CountryTable, to_tvdb_language
+from .imdb import IMDbRatings
+from .tmdb import TMDBClient, tmdb_rating
 from .overrides import OverrideStore
 from .tvdb import TVDBClient, TVDBError, TVDBNotFound
 
@@ -58,10 +60,19 @@ class SeasonInfo:
 
 
 class Agent:
-    def __init__(self, settings: Settings, tvdb: TVDBClient, overrides: OverrideStore) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        tvdb: TVDBClient,
+        overrides: OverrideStore,
+        imdb: IMDbRatings | None = None,
+        tmdb: TMDBClient | None = None,
+    ) -> None:
         self.settings = settings
         self.tvdb = tvdb
         self.overrides = overrides
+        self.imdb = imdb
+        self.tmdb = tmdb
         self.countries = CountryTable()
         self._art_types: dict[int, tuple[str, str | None]] | None = None
         self._countries_loaded = False
@@ -483,9 +494,9 @@ class Agent:
         if not include_children:
             series = await self.series(series_id, ctx)
             _, configured, _ = self.resolve_order(series, ctx)
-            return self.show_metadata(series, ctx, configured)
+            return await self._enrich_show(self.show_metadata(series, ctx, configured), series_id)
         series, order, configured, _, seasons = await self._show_context(series_id, ctx)
-        md = self.show_metadata(series, ctx, configured)
+        md = await self._enrich_show(self.show_metadata(series, ctx, configured), series_id)
         show = self._show_ref(series, ctx)
         children = [self.season_metadata(series, order, s, ctx, show) for s in seasons]
         md["Children"] = {"size": len(children), "Metadata": children}
@@ -515,6 +526,7 @@ class Agent:
                 self.episode_metadata(series, order, e, ctx, show, season_ref, details.get(int(e["id"])))
                 for e in info.episodes
             ]
+            await self._enrich_episodes(eps)
             md["Children"] = {"size": len(eps), "Metadata": eps}
         return md
 
@@ -563,7 +575,69 @@ class Agent:
         except TVDBError as exc:
             log.debug("episode %s extended unavailable: %s", episode_id, exc)
             extended = None
-        return self.episode_metadata(series, order, ep, ctx, show, season_ref, extended)
+        md = self.episode_metadata(series, order, ep, ctx, show, season_ref, extended)
+        await self._enrich_episodes([md])
+        return md
+
+    # ---------------------------------------------------- ratings / ids
+    async def _enrich_show(self, md: dict, series_id: int) -> dict:
+        """Add IMDb/TMDB ratings and any TMDB/IMDb ids TVDB lacks."""
+        try:
+            tmdb_value = None
+            if self.tmdb is not None:
+                known = _guid_map(md)
+                tv: dict = {}
+                if known.get("tmdb"):
+                    tv = await self.tmdb.tv(known["tmdb"])
+                else:
+                    found = await self.tmdb.find_by_tvdb(series_id)
+                    hit = next(iter(found.get("tv_results") or []), None)
+                    if hit:
+                        tv = await self.tmdb.tv(hit["id"]) or hit
+                if tv:
+                    _add_guid(md, "tmdb", tv.get("id"))
+                    _add_guid(md, "imdb", (tv.get("external_ids") or {}).get("imdb_id"))
+                    tmdb_value = tmdb_rating(tv)
+            self._set_ratings(md, tmdb_value)
+        except Exception as exc:  # ratings are optional; never fail the request
+            log.warning("Could not add ratings for series %s: %s", series_id, exc)
+        return md
+
+    async def _enrich_episodes(self, mds: list[dict]) -> list[dict]:
+        use_tmdb = self.tmdb is not None and self.settings.episode_details
+
+        async def one(md: dict) -> None:
+            try:
+                tmdb_value = None
+                tvdb_id = _guid_map(md).get("tvdb")
+                if use_tmdb and tvdb_id and tvdb_id.isdigit():
+                    found = await self.tmdb.find_by_tvdb(int(tvdb_id))  # type: ignore[union-attr]
+                    hit = next(iter(found.get("tv_episode_results") or []), None)
+                    if hit:
+                        _add_guid(md, "tmdb", hit.get("id"))
+                        tmdb_value = tmdb_rating(hit)
+                        if "imdb" not in _guid_map(md) and hit.get("show_id") is not None:
+                            ext = await self.tmdb.episode_external_ids(  # type: ignore[union-attr]
+                                hit["show_id"], hit.get("season_number", 0), hit.get("episode_number", 0)
+                            )
+                            _add_guid(md, "imdb", ext.get("imdb_id"))
+                self._set_ratings(md, tmdb_value)
+            except Exception as exc:
+                log.warning("Could not add ratings for %s: %s", md.get("ratingKey"), exc)
+
+        if self.imdb is not None or use_tmdb:
+            await asyncio.gather(*(one(md) for md in mds))
+        return mds
+
+    def _set_ratings(self, md: dict, tmdb_value: float | None) -> None:
+        ratings = []
+        imdb_value = self.imdb.rating(_guid_map(md).get("imdb")) if self.imdb is not None else None
+        if imdb_value is not None:
+            ratings.append({"image": "imdb://image.rating", "type": "audience", "value": imdb_value})
+        if tmdb_value is not None:
+            ratings.append({"image": "themoviedb://image.rating", "type": "audience", "value": tmdb_value})
+        if ratings:
+            md["Rating"] = ratings
 
     async def children(self, rating_key: str, ctx: Ctx) -> list[dict]:
         key = keys.parse_key(rating_key)
@@ -583,10 +657,11 @@ class Agent:
             season_md = self.season_metadata(series, order, info, ctx, show)
             season_ref = {"title": season_md["title"], "thumb": season_md.get("thumb")}
             details = await self._episode_details(info.episodes)
-            return [
+            eps = [
                 self.episode_metadata(series, order, e, ctx, show, season_ref, details.get(int(e["id"])))
                 for e in info.episodes
             ]
+            return await self._enrich_episodes(eps)
         return []
 
     async def grandchildren(self, rating_key: str, ctx: Ctx) -> list[dict]:
@@ -835,6 +910,22 @@ class Agent:
         if not manual:
             matches = matches[:1]
         return [await self.episode_item(sid, order, int(e["id"]), ctx) for e in matches]
+
+
+def _guid_map(md: dict) -> dict[str, str]:
+    """``{"imdb": "tt123", "tvdb": "42"}`` from a Metadata ``Guid`` array."""
+    out: dict[str, str] = {}
+    for g in md.get("Guid") or []:
+        scheme, _, value = str(g.get("id", "")).partition("://")
+        if value and scheme not in out:
+            out[scheme] = value
+    return out
+
+
+def _add_guid(md: dict, scheme: str, value: object) -> None:
+    if value in (None, "", 0) or scheme in _guid_map(md):
+        return
+    md.setdefault("Guid", []).append({"id": f"{scheme}://{value}"})
 
 
 def _first_url(images: list[dict] | None) -> str | None:
