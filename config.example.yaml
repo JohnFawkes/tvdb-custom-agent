@@ -30,6 +30,9 @@ defaults:
   fallback_to_default_order: true
   theme_music: true              # link Plex's TV theme songs (tvthemes.plexapp.com)
   season_titles: true            # use TVDB season names ("Volume Two") instead of "Season 2"
+  # Cast, crew and IMDb/TMDB ids for every episode when Plex loads a season
+  # (one TVDB request per episode, cached). Plex never asks for single episodes.
+  episode_details: true
   max_cast: 50
   match_min_score: 40            # 0-100; automatic matches below this are rejected
   match_max_results: 10          # results for a manual "Fix Match" search

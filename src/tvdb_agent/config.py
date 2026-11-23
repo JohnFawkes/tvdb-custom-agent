@@ -108,6 +108,7 @@ class Settings:
 
     theme_music: bool = True
     season_titles: bool = True  # use TVDB season names when present
+    episode_details: bool = True  # cast/crew/IMDb ids for every episode of a season
     max_cast: int = 50
     match_min_score: int = 40
     match_max_results: int = 10
@@ -185,6 +186,7 @@ def build_settings(data: dict[str, Any], env: bool = True) -> Settings:
     s.fallback_to_default_order = _bool(defaults.get("fallback_to_default_order"), True)
     s.theme_music = _bool(defaults.get("theme_music"), True)
     s.season_titles = _bool(defaults.get("season_titles"), True)
+    s.episode_details = _bool(defaults.get("episode_details"), True)
     s.max_cast = int(defaults.get("max_cast") or s.max_cast)
     s.match_min_score = int(defaults.get("match_min_score", s.match_min_score))
     s.match_max_results = int(defaults.get("match_max_results") or s.match_max_results)
@@ -213,6 +215,8 @@ def build_settings(data: dict[str, Any], env: bool = True) -> Settings:
         s.episode_order = _env("DEFAULT_EPISODE_ORDER") or s.episode_order
         if _env("HONOR_PLEX_EPISODE_ORDER") is not None:
             s.honor_plex_episode_order = _bool(_env("HONOR_PLEX_EPISODE_ORDER"), True)
+        if _env("EPISODE_DETAILS") is not None:
+            s.episode_details = _bool(_env("EPISODE_DETAILS"), True)
         if _env("THEME_MUSIC") is not None:
             s.theme_music = _bool(_env("THEME_MUSIC"), True)
         if _env("BUILTIN_PROFILES") is not None:
