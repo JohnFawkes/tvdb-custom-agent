@@ -386,6 +386,7 @@ class Agent:
                 "thumb": None,
             }
         title = ep.get("_name") or ep.get("name") or f"Episode {number}"
+        original_title = (ep.get("name") or "").strip()
         md: dict[str, Any] = {
             "ratingKey": rk,
             "key": ctx.path(rk),
@@ -408,6 +409,8 @@ class Agent:
             "grandparentThumb": show.get("thumb"),
             "grandparentArt": show.get("art"),
         }
+        if original_title and original_title != title and series.get("originalLanguage") not in ctx.langs[:1]:
+            md["originalTitle"] = original_title
         date = mapper.iso_date(ep.get("aired"))
         if date:
             md["originallyAvailableAt"] = date
@@ -507,9 +510,31 @@ class Agent:
                 md["summary"] = summary
         if include_children:
             season_ref = {"title": md["title"], "thumb": md.get("thumb")}
-            eps = [self.episode_metadata(series, order, e, ctx, show, season_ref) for e in info.episodes]
+            details = await self._episode_details(info.episodes)
+            eps = [
+                self.episode_metadata(series, order, e, ctx, show, season_ref, details.get(int(e["id"])))
+                for e in info.episodes
+            ]
             md["Children"] = {"size": len(eps), "Metadata": eps}
         return md
+
+    async def _episode_details(self, episodes: list[dict]) -> dict[int, dict]:
+        """Extended TVDB records (cast, crew, IMDb/TMDB ids, ratings) for a
+        season's episodes. Plex refreshes a show by fetching each season with
+        includeChildren=1 and never asks for single episodes, so the season's
+        children have to carry the full episode metadata."""
+        if not self.settings.episode_details or not episodes:
+            return {}
+
+        async def one(episode_id: int) -> tuple[int, dict | None]:
+            try:
+                return episode_id, await self.tvdb.episode_extended(episode_id)
+            except TVDBError as exc:
+                log.debug("episode %s extended unavailable: %s", episode_id, exc)
+                return episode_id, None
+
+        results = await asyncio.gather(*(one(int(e["id"])) for e in episodes))
+        return {eid: rec for eid, rec in results if rec}
 
     async def _season_summary(self, season_id: int, ctx: Ctx) -> str | None:
         for lang in ctx.langs:
@@ -557,7 +582,11 @@ class Agent:
             show = self._show_ref(series, ctx)
             season_md = self.season_metadata(series, order, info, ctx, show)
             season_ref = {"title": season_md["title"], "thumb": season_md.get("thumb")}
-            return [self.episode_metadata(series, order, e, ctx, show, season_ref) for e in info.episodes]
+            details = await self._episode_details(info.episodes)
+            return [
+                self.episode_metadata(series, order, e, ctx, show, season_ref, details.get(int(e["id"])))
+                for e in info.episodes
+            ]
         return []
 
     async def grandchildren(self, rating_key: str, ctx: Ctx) -> list[dict]:

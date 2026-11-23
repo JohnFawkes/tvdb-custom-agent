@@ -480,3 +480,40 @@ def test_extras_is_empty(client):
     container = client.get("/profiles/dvd/library/metadata/series-1000/extras").json()["MediaContainer"]
     assert container["size"] == 0 and container["Metadata"] == []
     assert client.get("/library/metadata/nonsense/extras").status_code == 404
+
+
+# --------------------------------------------- episode details in seasons
+def test_season_children_carry_full_episode_details(client, fake):
+    # Plex refreshes via season?includeChildren=1 and never asks for single
+    # episodes, so cast, crew and external ids must be on the season's children.
+    md = one(client.get("/library/metadata/season-1000-official-1", params={"includeChildren": 1}))
+    ep = md["Children"]["Metadata"][0]
+    assert ep["ratingKey"] == "episode-1000-official-9001"
+    assert [g["id"] for g in ep["Guid"]] == ["tvdb://9001", "imdb://tt809001"]
+    assert ep["Director"][0]["tag"] == "Epi Director"
+    assert ep["Writer"][0]["tag"] == "Epi Writer"
+    assert [r["tag"] for r in ep["Role"]][:2] == ["Gus Guest", "Ann Actor"]
+    # /children of a season gets the same details.
+    eps = items(client.get("/library/metadata/season-1000-official-1/children"))
+    assert eps[0]["Director"][0]["tag"] == "Epi Director"
+    # Each episode's extended record is fetched once and then cached.
+    client.get("/library/metadata/season-1000-official-1", params={"includeChildren": 1})
+    assert fake.count("/episodes/9001/extended") == 1
+
+
+def test_episode_details_can_be_disabled(make_client, fake):
+    c = make_client({"defaults": {"episode_details": False}})
+    md = one(c.get("/library/metadata/season-1000-official-1", params={"includeChildren": 1}))
+    ep = md["Children"]["Metadata"][0]
+    assert "Director" not in ep and [g["id"] for g in ep["Guid"]] == ["tvdb://9001"]
+    assert fake.count("/episodes/") == 0
+    # A single-episode request still gets the full record.
+    assert one(c.get("/library/metadata/episode-1000-official-9001"))["Director"]
+
+
+def test_episode_original_title(client):
+    eps = items(client.get("/library/metadata/series-3000/grandchildren", headers={"X-Plex-Language": "en-US"}))
+    assert (eps[0]["title"], eps[0].get("originalTitle")) == ("The Beginning", "Hajimari")
+    assert "originalTitle" not in eps[1]  # no English title, so the title already is the original
+    eps = items(client.get("/library/metadata/series-1000/grandchildren"))
+    assert all("originalTitle" not in e for e in eps)  # English show, English request
