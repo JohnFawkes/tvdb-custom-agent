@@ -22,6 +22,8 @@ services:
       TVDB_API_KEY: "${TVDB_API_KEY:?set TVDB_API_KEY in .env}"   # required
       TVDB_PIN: "${TVDB_PIN:-}"             # only for user-supported (subscriber) keys
       ADMIN_TOKEN: "${ADMIN_TOKEN:-}"       # protects /admin; strongly recommended
+      # TMDB_API_KEY: "${TMDB_API_KEY:-}"   # optional: TMDB ratings + missing TMDB/IMDb ids
+      # IMDB_RATINGS: "false"               # skip the IMDb ratings dataset download
       # DEFAULT_LANGUAGE: "en"              # used when Plex does not send X-Plex-Language
       # DEFAULT_EPISODE_ORDER: "default"    # default | aired | dvd | absolute | ...
       # Used by "Register in Plex" on the admin page (adds one Plex agent per ordering):

@@ -109,6 +109,11 @@ class Settings:
     theme_music: bool = True
     season_titles: bool = True  # use TVDB season names when present
     episode_details: bool = True  # cast/crew/IMDb ids for every episode of a season
+
+    imdb_ratings: bool = True  # IMDb ratings from IMDb's public dataset
+    imdb_refresh_hours: float = 24
+    imdb_dataset_url: str = "https://datasets.imdbws.com/title.ratings.tsv.gz"
+    tmdb_api_key: str | None = None  # optional: TMDB ratings and missing TMDB/IMDb ids
     max_cast: int = 50
     match_min_score: int = 40
     match_max_results: int = 10
@@ -187,6 +192,11 @@ def build_settings(data: dict[str, Any], env: bool = True) -> Settings:
     s.theme_music = _bool(defaults.get("theme_music"), True)
     s.season_titles = _bool(defaults.get("season_titles"), True)
     s.episode_details = _bool(defaults.get("episode_details"), True)
+    imdb = data.get("imdb") or {}
+    s.imdb_ratings = _bool(imdb.get("ratings"), True)
+    s.imdb_refresh_hours = float(imdb.get("refresh_hours") or s.imdb_refresh_hours)
+    s.imdb_dataset_url = imdb.get("dataset_url") or s.imdb_dataset_url
+    s.tmdb_api_key = (data.get("tmdb") or {}).get("api_key") or None
     s.max_cast = int(defaults.get("max_cast") or s.max_cast)
     s.match_min_score = int(defaults.get("match_min_score", s.match_min_score))
     s.match_max_results = int(defaults.get("match_max_results") or s.match_max_results)
@@ -215,6 +225,9 @@ def build_settings(data: dict[str, Any], env: bool = True) -> Settings:
         s.episode_order = _env("DEFAULT_EPISODE_ORDER") or s.episode_order
         if _env("HONOR_PLEX_EPISODE_ORDER") is not None:
             s.honor_plex_episode_order = _bool(_env("HONOR_PLEX_EPISODE_ORDER"), True)
+        if _env("IMDB_RATINGS") is not None:
+            s.imdb_ratings = _bool(_env("IMDB_RATINGS"), True)
+        s.tmdb_api_key = _env("TMDB_API_KEY") or s.tmdb_api_key
         if _env("EPISODE_DETAILS") is not None:
             s.episode_details = _bool(_env("EPISODE_DETAILS"), True)
         if _env("THEME_MUSIC") is not None:
